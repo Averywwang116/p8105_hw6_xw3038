@@ -1,0 +1,115 @@
+---
+title: "p8105_hw6_xw3038"
+author: "Avery Wang"
+date: "2024-12-01"
+output: github_document
+---
+
+
+Load the packages
+
+```{r}
+library(tidyverse)
+library(broom)
+library(purrr)
+
+library(rnoaa)
+```
+
+## Problem 2
+
+* Load and Clean the data
+
+```{r}
+homicide=read_csv(file = "./homicide-data.csv", na = c(".", "NA", "Unknown")) |>
+  janitor::clean_names()
+
+homicide_cleaned =homicide |>
+  mutate(
+    city_state=paste(city, state, sep = ", "),
+    is_solved=if_else(disposition=="Closed by arrest", 1, 0),
+    victim_age=as.numeric(victim_age),
+    victim_race=as.factor(victim_race),
+    victim_sex=as.factor(victim_sex)
+  ) |>
+  # Exclude specific cities and limit analysis to specified victim races
+  filter(
+    !(city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")) &
+      victim_race %in% c("White", "Black"),
+    !is.na(victim_sex), !is.na(victim_age), !is.na(victim_race), !is.na(is_solved)
+  )
+
+```
+
+* Extract the adjusted odds ratio (and CI) for solving homicides comparing male victims to female victims
+
+```{r}
+baltimore_data=homicide_cleaned |>
+  filter(city_state=="Baltimore, MD")
+logistic_model=glm_model=glm(
+  is_solved ~ victim_age + victim_sex + victim_race,
+  family = binomial(link = "logit"),
+  data = baltimore_data
+)
+
+glm_summary_odds=broom::tidy(glm_model,conf.int = TRUE, exponentiate = TRUE)
+glm_summary_odds
+
+```
+
+```{r}
+male_adjusted_odds=glm_summary_odds|>
+  filter(term == "victim_sexMale")|>
+  select(term, estimate, conf.low, conf.high)
+# View the result
+print(male_adjusted_odds)
+```
+
+* Run glm for each of the cities in your dataset, and extract the adjusted odds ratio (and CI) for solving homicides comparing male victims to female victims. 
+
+```{r}
+city_glm=homicide_cleaned|>
+  group_by(city_state)|>
+  nest()|>
+  #add model for each city
+  mutate(glm_model=map(data, \(df) glm(is_solved ~ victim_age + victim_sex + victim_race, 
+                                family = binomial(link = "logit"), 
+                                data = df)),
+         result=map(glm_model, \(model) broom::tidy(model, 
+                                                    conf.int = TRUE, 
+                                                    exponentiate = TRUE)))|>
+  select(-data,-glm_model)|>
+  unnest(result)
+```
+
+```{r}
+male_city_glm=city_glm|>
+  filter(term == "victim_sexMale") |>
+  select(city_state, estimate, conf.low, conf.high)
+male_city_glm
+```
+
+* Create a plot that shows the estimated ORs and CIs for each city. Organize cities according to estimated OR, and comment on the plot.
+
+```{r}
+city_results_arrange=male_city_glm|>
+  arrange(estimate)|>
+  mutate(city_state = as.factor(city_state))
+city_results_arrange
+```
+
+```{r}
+city_results_arrange|>ggplot(aes(x = city_state, y = estimate,color=city_state)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
+  coord_flip() + 
+  labs(
+    title = "Adjusted Odds Ratios (Male vs Female) by Different City",
+    x = "City",
+    y = "Odds Ratio"
+  ) +
+  theme_minimal()+ 
+  theme(legend.position = "none")
+```
+
+
