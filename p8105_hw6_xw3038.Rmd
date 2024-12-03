@@ -4,9 +4,7 @@ author: "Avery Wang"
 date: "2024-12-01"
 output: github_document
 ---
-
-
-Load the packages
+Load the package
 
 ```{r}
 library(tidyverse)
@@ -190,7 +188,7 @@ city_results_arrange
 ```
 
 ```{r}
-city_results_arrange|>ggplot(aes(x=reorder(city_state, estimate), y = estimate, 
+cityplot=city_results_arrange|>ggplot(aes(x=reorder(city_state, estimate), y = estimate, 
                                  color=city_state)) +
   geom_point() +
   geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
@@ -202,6 +200,7 @@ city_results_arrange|>ggplot(aes(x=reorder(city_state, estimate), y = estimate,
   ) +
   theme_minimal()+ 
   theme(legend.position = "none")
+cityplot
 ```
 
 Cities with OR > 1 (such as Stockton, CA; Albuquerque, NM) show the cases involving male victims are more likely to be solved than those involving female victims. And the majority cities have OR less than 1. Some cities, like Stockton, CA and Albuquerque, NM, have wide CIs, indicating high variability and uncertainty. Narrower CIs in cities like Chicago, IL also suggest more reliable estimates.
