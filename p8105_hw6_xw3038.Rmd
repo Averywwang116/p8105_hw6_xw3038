@@ -12,8 +12,26 @@ Load the packages
 library(tidyverse)
 library(broom)
 library(purrr)
+library(modelr)
 library(rnoaa)
+set.seed(123)
 ```
+
+```{r}
+library(p8105.datasets)
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
 
 ## Problem 2
 
@@ -45,7 +63,7 @@ homicide_cleaned =homicide |>
 ```{r}
 baltimore_data=homicide_cleaned |>
   filter(city_state=="Baltimore, MD")
-logistic_model=glm_model=glm(
+glm_model=glm(
   is_solved ~ victim_age + victim_sex + victim_race,
   family = binomial(link = "logit"),
   data = baltimore_data
@@ -93,12 +111,12 @@ male_city_glm
 ```{r}
 city_results_arrange=male_city_glm|>
   arrange(estimate)|>
-  mutate(city_state = as.factor(city_state))
+  mutate(city_state = factor(city_state, levels = city_state))
 city_results_arrange
 ```
 
 ```{r}
-city_results_arrange|>ggplot(aes(x = city_state, y = estimate,color=city_state)) +
+city_results_arrange|>ggplot(aes(x=reorder(city_state, estimate), y = estimate, color=city_state)) +
   geom_point() +
   geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
   coord_flip() + 
@@ -111,4 +129,125 @@ city_results_arrange|>ggplot(aes(x = city_state, y = estimate,color=city_state))
   theme(legend.position = "none")
 ```
 
+Cities with OR > 1 (such as Stockton, CA; Albuquerque, NM) show the cases involving male victims are more likely to be solved than those involving female victims. And the majority cities have OR less than 1. Some cities, like Stockton, CA and Albuquerque, NM, have wide CIs, indicating high variability and uncertainty. Narrower CIs in cities like Chicago, IL also suggest more reliable estimates.
 
+## Problem 3
+
+```{r}
+birthweight=read_csv(file = "./data/birthweight.csv", na = c(".", "NA", "Unknown")) |>
+  janitor::clean_names()
+```
+
+* Load and clean the data for regression analysis
+
+```{r}
+birthweight_cleaned=birthweight|>
+  mutate( 
+    babysex = factor(babysex, levels = c(1, 2), labels = c("Male", "Female")),
+    frace = factor(frace, levels = c(1, 2, 3, 4, 8, 9), 
+                   labels = c("White", "Black", "Asian", "Puerto Rican", "Other", "Unknown")),
+    mrace = factor(mrace, levels = c(1, 2, 3, 4, 8), 
+                   labels = c("White", "Black", "Asian", "Puerto Rican", "Other")),
+    malform = factor(malform, levels = c(0, 1), labels = c("Absent", "Present")),
+    fincome = fincome * 100
+  )|>
+  drop_na()
+```
+
+* Propose a regression model for birthweight
+
+```{r}
+birthweight_model=lm(
+  bwt ~ babysex + blength + bhead + momage + mheight + ppbmi +
+    smoken + wtgain + menarche+ fincome,
+  data = birthweight_cleaned
+)
+birthweight_model
+```
+
+The goal is to predic the baby's birthweight (`bwt`) assuming that the birthweight is influenced by:
+Baby's Physical Characteristics: `babysex`, `blength`, `bhead`. Maternal Characteristics: `momage`, `mheight`, `ppbmi`, `smoken`, `wtgain`, `menarche`. Family condition as the sociaeconomic consideration: `fincome`. 
+
+```{r}
+birthweight_cleaned |>
+  add_predictions(birthweight_model) |>
+  add_residuals(birthweight_model)|>
+  ggplot( aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    title = "Residuals vs Fitted Values",
+    x = "Predictions ",
+    y = "Residuals"
+  ) +
+  theme_minimal()
+```
+
+
+* Compare with the other two models
+
+
+```{r}
+model2=lm(bwt ~blength + gaweeks, data = birthweight_cleaned)
+model3=lm(bwt~ bhead * blength * babysex, data = birthweight_cleaned)
+
+```
+
+```{r}
+cv_df = crossv_mc(birthweight_cleaned, 100) |>
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+)
+
+cv_df=cv_df |> 
+  mutate(
+    # Define and fit models
+    original_mod = map(train, \(df) lm(bwt ~babysex + blength + bhead + momage + mheight + ppbmi +
+                              smoken + wtgain + menarche+ fincome, data = df)),
+    model2_mod = map(train, \(df) lm(bwt ~ blength + gaweeks, data = df)),
+    model3_mod = map(train, \(df) lm(bwt ~ bhead * blength * babysex, data = df))
+  )|>
+  mutate(
+    # Calculate RMSE for each model on the test sets
+    rmse_original = map2_dbl(original_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_model2 = map2_dbl(model2_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_model3 = map2_dbl(model3_mod, test, \(mod, df) rmse(model = mod, data = df))
+  )
+
+```
+
+```{r}
+summary_results=cv_df |> 
+  summarise(
+    mean_rmse_original = mean(rmse_original),
+    mean_rmse_model2 = mean(rmse_model2),
+    mean_rmse_model3 = mean(rmse_model3)
+  )
+
+print(summary_results)
+```
+```{r}
+cv_long=cv_df |> select(starts_with("rmse"))|>
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") |> 
+  mutate(model = fct_inorder(model))
+
+
+```
+
+```{r}
+ cv_long|>ggplot(aes(x = model, y = rmse)) + 
+   geom_violin()+
+  labs(
+    title = "Cross-Validated RMSE for Birthweight Models",
+    x = "Model",
+    y = "RMSE"
+  ) +
+  theme_minimal()
+```
+
+The original hypothesized model seems to have the best performance, with relatively the best accuracy. The model with the main effect shows the highest rmse, indicating it performs worse. And the model three-way interaction performs slightly better but still wors than the orginial hypothesized model
