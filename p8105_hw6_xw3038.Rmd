@@ -67,7 +67,7 @@ boot_straps=boot_straps |>
 boot_straps
 ```
 
-* Plot distribution of Estimate
+* Plot distribution of the Estimate
 
 ```{r}
 boot_straps_longer=boot_straps |> 
