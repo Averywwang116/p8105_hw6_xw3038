@@ -17,6 +17,8 @@ library(rnoaa)
 set.seed(123)
 ```
 
+## Problem 1
+
 ```{r}
 library(p8105.datasets)
 weather_df = 
@@ -31,6 +33,74 @@ weather_df =
     tmax = tmax / 10) %>%
   select(name, id, everything())
 ```
+* Define bootstrap resampling function
+
+```{r}
+boot_sample = function(df) {
+  sample_frac(df, replace = TRUE)
+}
+boot_straps = 
+  tibble(strap_number = 1:5000) |> 
+  mutate(
+    strap_sample = map(strap_number,\(i) boot_sample(df = weather_df))
+  )
+
+boot_straps
+```
+
+* For each bootstrap sample, a linear regression model is fit to predict tmax based on tmin.
+
+```{r}
+boot_straps=boot_straps |> 
+  mutate(
+    strap_model = map(strap_sample, \(df) lm(tmax ~ tmin, data = df)), 
+    result = map(strap_model, \(mod) {
+      # Extract R^2 and log(β0 * β1)
+      r_squared=glance(mod)$r.squared
+      coefficients=tidy(mod)|>filter(term %in% c("(Intercept)", "tmin")) |> pull(estimate)
+      log_beta_product=log(coefficients[1] * coefficients[2])
+      tibble(r_squared,log_beta_product)
+    })
+  )|> select(-strap_sample, -strap_model)|>
+  unnest(result)
+
+boot_straps
+```
+
+* Plot distribution of Estimate
+
+```{r}
+boot_straps_longer=boot_straps |> 
+  pivot_longer(cols = c(r_squared, log_beta_product), 
+               names_to = "metrics", values_to = "value") 
+boot_straps_longer|>
+  ggplot(aes(x = value, fill = metrics)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~metrics, scales = "free") +
+  labs(
+    title = "Bootstrap Distributions of R^2 and log(β0 * β1)",
+    x = "Value",
+    y = "Density"
+  ) +
+  theme_minimal()
+```
+
+For the distribution of the log product, it us centered around 2, also showing the low variability across the bootstrap sample. The distribution of r-squared is also centered around 0.91. The high and consistent R-squared values also suggest that the model effectively explains a significant proportion of the variation in tmax across bootstrap samples.
+ 
+* Calculate CI for these two
+```{r}
+# Calculate 95% confidence intervals
+bootstrap_CI=boot_straps |> 
+  summarise(
+    r_squared_lower = quantile(r_squared, 0.025),
+    r_squared_upper = quantile(r_squared, 0.975),
+    log_beta_product_lower = quantile(log_beta_product, 0.025),
+    log_beta_product_upper = quantile(log_beta_product, 0.975)
+  )
+
+print(bootstrap_CI)
+```
+The CI for R^2 is around  [`r round(bootstrap_CI$r_squared_lower,2)`, `r round(bootstrap_CI$r_squared_upper,2)`]. And CI for log beta product is [`r round(bootstrap_CI$log_beta_product_lower,2)`, `r round(bootstrap_CI$log_beta_product_upper,2)`].
 
 
 ## Problem 2
@@ -183,7 +253,7 @@ birthweight_cleaned |>
   add_residuals(birthweight_model)|>
   ggplot( aes(x = pred, y = resid)) +
   geom_point(alpha = 0.5) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_hline(yintercept = 0, linetype = "dashed",color="red") +
   labs(
     title = "Residuals vs Fitted Values",
     x = "Predictions ",
